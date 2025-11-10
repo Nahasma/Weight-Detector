@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Item Recognizer (MVP)</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            max-width: 600px; 
+            margin: 20px auto; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 { 
+            text-align: center; 
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        #uploader { 
+            border: 3px dashed #667eea; 
+            padding: 30px; 
+            text-align: center; 
+            border-radius: 10px;
+            background: #f8f9ff;
+            margin-bottom: 20px;
+        }
+        #uploader:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        input[type="file"] {
+            margin: 15px 0;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            width: 80%;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #results { 
+            margin-top: 20px; 
+            border: 2px solid #667eea; 
+            padding: 20px; 
+            border-radius: 10px;
+            background: #f8f9ff;
+        }
+        #loading { 
+            display: none; 
+            color: #667eea; 
+            text-align: center;
+            font-size: 18px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        #error { 
+            display: none; 
+            color: #e74c3c; 
+            background: #ffeaea;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #e74c3c;
+            margin: 20px 0;
+        }
+        .result-item {
+            margin: 15px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .result-label {
+            font-weight: bold;
+            color: #333;
+            display: inline-block;
+            width: 120px;
+        }
+        .result-value {
+            color: #667eea;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        #preview {
+            max-width: 200px;
+            max-height: 200px;
+            margin: 15px 0;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Item Recognizer</h1>
+
+        <div id="configPanel" style="margin-bottom: 20px; border: 2px solid #667eea; padding: 20px; border-radius: 10px; background: #f8f9ff;">
+            <h3>🔑 API Key 配置</h3>
+            <input type="text" id="apiKeyInput" placeholder="输入 SILICONFLOW_API_KEY" style="width: 80%; padding: 10px; border: 2px solid #ddd; border-radius: 5px;">
+            <br><br>
+            <button id="apiKeySaveButton">✅ 确定配置</button>
+            <div id="configStatus" style="margin-top: 10px; color: #333;"></div>
+        </div>
+
+        <div id="uploader">
+            <h3>📸 Upload an Image</h3>
+            <input type="file" id="imageInput" accept="image/jpeg, image/png">
+            <div style="margin: 10px 0;">
+                <label for="modelSelect" style="display:block; margin-bottom:6px; color:#333;">选择AI模型：</label>
+                <select id="modelSelect" style="width:80%; padding:10px; border:2px solid #ddd; border-radius:5px;">
+                    <option>Qwen/Qwen3-VL-32B-Instruct</option>
+                    <option>Qwen/Qwen3-VL-32B-Thinking</option>
+                    <option>Qwen/Qwen3-VL-8B-Instruct</option>
+                    <option>Qwen/Qwen3-VL-8B-Thinking</option>
+                    <option>Qwen/Qwen3-VL-235B-A22B-Instruct</option>
+                    <option>Qwen/Qwen3-VL-235B-A22B-Thinking</option>
+                    <option>Qwen/Qwen3-Omni-30B-A3B-Instruct</option>
+                    <option>Qwen/Qwen3-Omni-30B-A3B-Thinking</option>
+                </select>
+            </div>
+            <div id="previewContainer" style="display: none;">
+                <img id="preview" src="" alt="Preview">
+            </div>
+            <br><br>
+            <button id="uploadButton">🔍 Recognize Item</button>
+        </div>
+
+        <div id="loading">🤖 AI is analyzing your image...</div>
+        <div id="error"></div>
+        
+        <div id="results" style="display: none;">
+            <h2>🎯 Recognition Result:</h2>
+            <div class="result-item">
+                <span class="result-label">Item Name:</span>
+                <span class="result-value" id="itemName">---</span>
+            </div>
+            <div class="result-item">
+                <span class="result-label">Est. Weight:</span>
+                <span class="result-value" id="itemWeight">---</span> kg
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('imageInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const loadingDiv = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        const itemNameSpan = document.getElementById('itemName');
+        const itemWeightSpan = document.getElementById('itemWeight');
+        const previewImg = document.getElementById('preview');
+        const previewContainer = document.getElementById('previewContainer');
+
+        // Backend server URLs
+        const API_URL = 'http://127.0.0.1:5001/recognize';
+        const CONFIG_URL = 'http://127.0.0.1:5001/config';
+
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const apiKeySaveButton = document.getElementById('apiKeySaveButton');
+        const configStatus = document.getElementById('configStatus');
+
+        // Image preview functionality
+        imageInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    previewContainer.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                previewContainer.style.display = 'none';
+            }
+        });
+
+        // 初始化：查询当前API Key配置状态
+        (async function initConfigStatus() {
+            try {
+                const res = await fetch(CONFIG_URL, { method: 'GET' });
+                if (!res.ok) throw new Error(`配置查询失败: ${res.status}`);
+                const data = await res.json();
+                if (data.configured) {
+                    configStatus.textContent = `当前已配置：${data.masked_key}`;
+                } else {
+                    configStatus.textContent = '当前未配置，请输入API Key并点击确定配置。';
+                }
+            } catch (e) {
+                configStatus.textContent = `无法获取配置状态：${e.message}`;
+            }
+        })();
+
+        // 保存API Key配置
+        apiKeySaveButton.addEventListener('click', async () => {
+            const key = (apiKeyInput.value || '').trim();
+            if (!key) {
+                showError('请先输入API Key');
+                return;
+            }
+            apiKeySaveButton.disabled = true;
+            try {
+                const res = await fetch(CONFIG_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: key })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || `配置失败: ${res.status}`);
+                configStatus.textContent = `配置成功：${data.masked_key}`;
+            } catch (e) {
+                showError(`配置错误：${e.message}`);
+            } finally {
+                apiKeySaveButton.disabled = false;
+            }
+        });
+
+        uploadButton.addEventListener('click', async () => {
+            if (!imageInput.files || imageInput.files.length === 0) {
+                showError('Please select an image file first.');
+                return;
+            }
+
+            const file = imageInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            const modelSelect = document.getElementById('modelSelect');
+            const modelName = modelSelect ? modelSelect.value : '';
+            if (modelName) formData.append('model', modelName);
+
+            // Reset UI
+            showLoading(true);
+            showError(null);
+            resultsDiv.style.display = 'none';
+            uploadButton.disabled = true;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error || `Server error: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Display results
+                itemNameSpan.textContent = data.item_name;
+                itemWeightSpan.textContent = data.estimated_weight_kg;
+                resultsDiv.style.display = 'block';
+
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+            } finally {
+                showLoading(false);
+                uploadButton.disabled = false;
+            }
+        });
+
+        function showLoading(isLoading) {
+            loadingDiv.style.display = isLoading ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            if (message) {
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,379 @@
+好的，这是专为 AI Code Agent 准备的 mvp_development_manual.txt。
+
+这份手册严格遵循了 MVP（“必须完成”部分）要求，并明确使用 SiliconFlow 作为 LLM 客户端。
+
+File: mvp_development_manual.txt
+TO: AI Code Agent TASK: Generate code for an "AI Item Recognition" MVP. PROJECT GOAL: Create a simple web tool. A user uploads an image. The tool returns the item's name and estimated weight. MVP CONSTRAINTS (Strict):
+
+
+
+Backend: Python + Flask (for speed and simplicity).
+
+
+Frontend: Single index.html file with vanilla JavaScript (no frameworks).
+
+AI Client: Must use the siliconflow Python library.
+
+
+Config: API Key must be loaded from a .env file, NOT hardcoded.
+
+Functionality:
+
+Image upload (must support .jpg/.png).
+
+
+Call SiliconFlow API (e.g., Qwen-VL-Plus, or similar vision model).
+
+Display "item_name" on the page.
+
+Display "estimated_weight" on the page.
+
+STEP 1: Project Structure
+Create the following file structure:
+
+/mvp-siliconflow-recognizer
+|
+├── /backend
+│   ├── app.py
+│   ├── requirements.txt
+│   └── .env
+│
+├── /frontend
+│   └── index.html
+│
+└── README.md
+STEP 2: Backend requirements.txt
+Create backend/requirements.txt with these dependencies:
+
+flask
+python-dotenv
+siliconflow
+flask-cors
+Pillow
+python-multipart
+STEP 3: Backend .env
+Create backend/.env. (The user must fill in their own key).
+
+# DO NOT hardcode this key in app.py
+# Get your key from https://platform.siliconflow.cn/
+SILICONFLOW_API_KEY=sk-xxxxxxxxxx
+STEP 4: Backend app.py
+Create backend/app.py. This is the core Flask application.
+
+Python
+
+import os
+import io
+import json
+import base64
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from dotenv import load_dotenv
+from siliconflow.client import SiliconflowClient
+from PIL import Image
+
+# --- 1. Initialization ---
+load_dotenv()
+app = Flask(__name__)
+
+# Enable CORS (Cross-Origin Resource Sharing)
+# This allows the HTML file to call the backend
+CORS(app) 
+
+# --- 2. Configuration & API Client ---
+API_KEY = os.getenv("SILICONFLOW_API_KEY")
+if not API_KEY:
+    raise ValueError("SILICONFLOW_API_KEY not found in .env file")
+
+client = SiliconflowClient(api_key=API_KEY)
+
+# --- 3. Image Validation Helper ---
+def validate_image(file_storage):
+    """
+    Validates the image (format and readability)
+    Supports: jpg, png [cite: 42]
+    """
+    try:
+        # Read file into memory
+        file_bytes = file_storage.read()
+        
+        # Use Pillow to verify it's a valid image
+        image = Image.open(io.BytesIO(file_bytes))
+        image.verify() # Verify the image data
+        
+        # Re-open after verify
+        image = Image.open(io.BytesIO(file_bytes))
+        
+        if image.format.upper() not in ["JPEG", "PNG"]:
+            raise ValueError("Invalid image format. Only JPG/PNG allowed.")
+            
+        return file_bytes, image.format
+        
+    except Exception as e:
+        print(f"Image validation failed: {e}")
+        return None, None
+    finally:
+        # Reset file pointer in case it's used again
+        file_storage.seek(0)
+
+# --- 4. Core API Route ---
+@app.route('/recognize', methods=['POST'])
+def recognize_item():
+    
+    # 1. Check for file [cite: 13]
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    # 2. Validate Image File
+    image_bytes, image_format = validate_image(file)
+    if not image_bytes:
+        return jsonify({"error": "Invalid or unsupported image file. Use JPG/PNG."}), 400
+
+    # 3. Call SiliconFlow API 
+    try:
+        # Encode image to Base64
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        mime_type = f"image/{image_format.lower()}"
+        image_url = f"data:{mime_type};base64,{base64_image}"
+
+        # Define the system prompt
+        # IMPORTANT: We force the model to return ONLY JSON.
+        system_prompt = """
+        You are an object recognition expert.
+        Analyze the user's image and identify the single main object.
+        Respond ONLY with a valid JSON object. Do not add any text before or after the JSON.
+        The JSON object must have exactly two keys:
+        1. "item_name": (string) The common name of the object.
+        2. "estimated_weight_kg": (float) The estimated weight of the object in kilograms.
+        
+        Example:
+        {
+          "item_name": "Red Apple",
+          "estimated_weight_kg": 0.15
+        }
+        """
+
+        # Using a capable vision model like Qwen-VL-Plus
+        completion = client.chat.completions.create(
+            model="Qwen/Qwen-VL-Plus",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_url}
+                        }
+                    ]
+                }
+            ],
+            max_tokens=256,
+            temperature=0.1
+        )
+
+        response_text = completion.choices[0].message.content
+        
+        # 4. Parse Response
+        # Clean potential markdown (```json ... ```)
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        
+        data = json.loads(response_text)
+        
+        # Validate required keys [cite: 15, 16]
+        if "item_name" not in data or "estimated_weight_kg" not in data:
+            raise ValueError("AI response missing required keys")
+
+        return jsonify(data)
+
+    except json.JSONDecodeError:
+        print(f"Failed to parse AI response: {response_text}")
+        return jsonify({"error": "AI response was not valid JSON"}), 500
+    except Exception as e:
+        print(f"Error calling AI API: {e}")
+        return jsonify({"error": f"AI API Error: {str(e)}"}), 503
+
+# --- 5. Run Server ---
+if __name__ == '__main__':
+    print("Starting Flask server on [http://127.0.0.1:5001](http://127.0.0.1:5001)")
+    app.run(port=5001)
+
+STEP 5: Frontend index.html
+Create frontend/index.html. This is the complete UI for the MVP.
+
+HTML
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Item Recognizer (MVP)</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 20px auto; }
+        h1 { text-align: center; }
+        #uploader { border: 2px dashed #ccc; padding: 20px; text-align: center; }
+        #results { margin-top: 20px; border: 1px solid #eee; padding: 10px; }
+        #loading { display: none; color: blue; }
+        #error { display: none; color: red; }
+    </style>
+</head>
+<body>
+
+    <h1>AI Item Recognizer [cite: 2]</h1>
+
+    <div id="uploader">
+        <input type="file" id="imageInput" accept="image/jpeg, image/png"> [cite: 42]
+        <br><br>
+        <button id="uploadButton">Recognize Item</button>
+    </div>
+
+    <div id="loading">Recognizing...</div>
+    <div id="error"></div>
+    
+    <div id="results" style="display: none;">
+        <h2>Recognition Result:</h2>
+        <p><strong>Item Name:</strong> <span id="itemName">---</span></p> 
+        <p><strong>Est. Weight:</strong> <span id="itemWeight">---</span> kg</p> 
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('imageInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const loadingDiv = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        const itemNameSpan = document.getElementById('itemName');
+        const itemWeightSpan = document.getElementById('itemWeight');
+
+        // Backend server URL
+        const API_URL = '[http://127.0.0.1:5001/recognize](http://127.0.0.1:5001/recognize)';
+
+        uploadButton.addEventListener('click', async () => {
+            if (!imageInput.files || imageInput.files.length === 0) {
+                showError('Please select an image file first.');
+                return;
+            }
+
+            const file = imageInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Reset UI
+            showLoading(true);
+            showError(null);
+            resultsDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error || `Server error: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Display results [cite: 9]
+                itemNameSpan.textContent = data.item_name;
+                itemWeightSpan.textContent = data.estimated_weight_kg;
+                resultsDiv.style.display = 'block';
+
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        function showLoading(isLoading) {
+            loadingDiv.style.display = isLoading ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            if (message) {
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+        }
+    </script>
+
+</body>
+</html>
+STEP 6: README.md
+Create README.md with instructions on how to run the MVP.
+
+
+Markdown
+
+# AI Item Recognizer (MVP)
+
+This project allows you to upload an image and get back the item's name and estimated weight, powered by the SiliconFlow AI API.
+
+## Technology Stack
+
+* **Backend:** Python (Flask)
+* **Frontend:** HTML / Vanilla JavaScript
+* **AI:** SiliconFlow (Qwen-VL-Plus)
+
+## How to Run
+
+### 1. Backend Setup
+
+1.  Navigate to the backend directory:
+    ```sh
+    cd backend
+    ```
+
+2.  (Recommended) Create a virtual environment:
+    ```sh
+    python -m venv venv
+    source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+    ```
+
+3.  Install dependencies:
+    ```sh
+    pip install -r requirements.txt
+    ```
+
+4.  Create your API key file. Copy the example:
+    ```sh
+    cp .env.example .env 
+    ```
+    *(Note: If .env.example doesn't exist, just create `.env`)*
+
+5.  Edit the `.env` file and add your SiliconFlow API key:
+    ```
+    SILICONFLOW_API_KEY=sk-your_actual_key_here
+    ```
+
+6.  Run the backend server:
+    ```sh
+    flask run --port 5001
+    ```
+    The backend is now running at `http://127.0.0.1:5001`
+
+### 2. Frontend Setup
+
+1.  Navigate to the `frontend` directory.
+2.  Open the `index.html` file directly in your web browser (e.g., Chrome, Firefox).
+
+### 3. Usage
+
+1.  Click "Choose File" and select a `.jpg` or `.png` image.
+2.  Click the "Recognize Item" button.
+3.  Wait for the result to appear below.
